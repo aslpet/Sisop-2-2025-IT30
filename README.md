@@ -1,5 +1,4 @@
 # Sisop-2-2025-IT30
-# Praktikum Sistem Operasi Modul 1
 ### by IT30
 
 
