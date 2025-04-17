@@ -936,3 +936,9 @@ int main(int argc, char *argv[]) {
     - fail → jalankan mode pemusnah proses non-whitelist.
     - revert → hentikan mode fail (hanya bisa oleh root).
 - Jika mode tidak dikenali, tampilkan pesan error dan keluar dengan status 1.
+  
+---
+**Revisi soal_4**
+Seharusnya ketika mode daemon di panggil mode tersebut akan membuat sebuah file log yang berisi proses yang akan terus diupdate selang beberapa detik, tetapi file log tidak muncul
+![alt text](https://github.com/DimasSatya446/GambarSISOP2/blob/main/Screenshot%202025-04-17%20230757.png?raw=true)
+
