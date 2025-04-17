@@ -14,3 +14,21 @@
 	
 ## Soal_1
 </div>
+
+
+<div align=center>
+	
+## Soal_2
+</div>
+
+
+<div align=center>
+	
+## Soal_3
+</div>
+
+
+<div align=center>
+	
+## Soal_4
+</div>
