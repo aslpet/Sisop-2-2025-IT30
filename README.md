@@ -473,3 +473,466 @@ A. Malware ini bekerja secara daemon dan menginfeksi perangkat korban dan menyem
 	
 ## Soal_4
 </div>
+
+
+# Doraemon: Nobita dan Alat Pengintai Proses
+
+```c
+#define LOG_PATH "/home/seribu_man/SISOP_2/soal_4/debugmon.log"
+```
+Lokasi log file tempat semua aktivitas dicatat, seperti proses yang sedang berjalan, proses yang dihentikan, dan status daemon.
+
+---
+**get_timestamp**
+```c
+void get_timestamp(char *buffer, size_t size) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    strftime(buffer, size, "[%d:%m:%Y]-[%H:%M:%S]", t);
+}
+```
+- Mengisi buffer dengan waktu lokal sekarang dalam format yang telah ditentukan.
+- Dipakai untuk memberi timestamp di setiap log entri.
+
+---
+**get_uid_from_username**
+```c
+unsigned int get_uid_from_username(const char *username) {
+    FILE *fp = fopen("/etc/passwd", "r");
+    if (!fp) {
+        perror("/etc/passwd");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), fp)) {
+        char *uname = strtok(line, ":");
+        strtok(NULL, ":"); 
+        char *uid_str = strtok(NULL, ":");
+
+        if (uname && uid_str && strcmp(uname, username) == 0) {
+            fclose(fp);
+            return (unsigned int)atoi(uid_str);
+        }
+    }
+
+    fclose(fp);
+    fprintf(stderr, "User '%s' tidak ditemukan\n", username);
+    exit(EXIT_FAILURE);
+}
+```
+Fungsi ini bertugas untuk mengambil UID dari user yang namanya diberikan sebagai argumen, dengan cara membaca file `/etc/passwd` . File tersebut berisi info user dalam format terpisah oleh titik dua (`:`), lalu fungsi ini membaca tiap baris, memisahkan field-nya menggunakan `strtok`, dan membandingkan username di baris tersebut dengan input. Jika cocok, UID diambil dari field ketiga dan dikembalikan sebagai hasil fungsi. Kalau tidak ditemukan sampai akhir file, program langsung keluar karena user dianggap tidak valid.
+
+---
+**get_uid_from_status**
+```c
+unsigned int get_uid_from_status(const char *pid) {
+    char path[256], line[256];
+    snprintf(path, sizeof(path), "/proc/%s/status", pid);
+
+    FILE *fp = fopen(path, "r");
+    if (!fp) return (unsigned int)-1;
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "Uid:", 4) == 0) {
+            unsigned int uid;
+            sscanf(line, "Uid:\t%u", &uid);
+            fclose(fp);
+            return uid;
+        }
+    }
+
+    fclose(fp);
+    return (unsigned int)-1;
+}
+```
+Fungsi ini digunakan untuk mengambil UID dari sebuah proses berdasarkan PID-nya, dengan cara membuka file `/proc/<pid>/status` dan mencari baris yang diawali dengan "Uid:". File tersebut menyimpan berbagai informasi status proses, dan UID berada di baris itu. Jika file tidak bisa dibuka (misalnya proses sudah mati), maka fungsi mengembalikan -1 sebagai tanda gagal. Ini penting untuk menyaring hanya proses milik user target.
+
+---
+**get_command**
+```c
+void get_command(const char *pid, char *out, size_t size) {
+    char path[256];
+    snprintf(path, sizeof(path), "/proc/%s/comm", pid);
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        strncpy(out, "-", size);
+        return;
+    }
+
+    fgets(out, size, fp);
+    out[strcspn(out, "\n")] = 0;
+    fclose(fp);
+}
+```
+Fungsi ini mengambil nama executable dari suatu proses berdasarkan PID, dengan cara membaca file `/proc/<pid>/comm` yang berisi nama singkat command tersebut. Nama tersebut kemudian disalin ke buffer output, dan newline (jika ada) dihapus dari akhir string. Kalau file tidak bisa dibuka, fungsi hanya mengisi `out` dengan karakter "-" sebagai fallback.
+
+---
+**get_memory_kb**
+```c
+long get_memory_kb(const char *pid) {
+    char path[256], line[256];
+    snprintf(path, sizeof(path), "/proc/%s/status", pid);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            long mem;
+            sscanf(line, "VmRSS: %ld", &mem);
+            fclose(fp);
+            return mem;
+        }
+    }
+    fclose(fp);
+    return 0;
+}
+```
+Fungsi ini membaca penggunaan memori (RSS, dalam KB) dari suatu proses berdasarkan PID, dengan membuka `/proc/<pid>/status` dan mencari baris yang diawali dengan "VmRSS:". Nilai memori di baris tersebut diambil dan dikembalikan. Jika file tidak bisa dibuka atau baris tidak ditemukan, maka fungsi mengembalikan 0 sebagai default.
+
+---
+**get_total_memory_kb**
+```c
+long get_total_memory_kb() {
+    FILE *fp = fopen("/proc/meminfo", "r");
+    char line[256];
+    if (!fp) return 1;
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "MemTotal:", 9) == 0) {
+            long mem;
+            sscanf(line, "MemTotal: %ld", &mem);
+            fclose(fp);
+            return mem;
+        }
+    }
+
+    fclose(fp);
+    return 1;
+}
+```
+Fungsi ini mengambil total memori sistem (RAM fisik) dalam satuan kilobyte, dengan membuka file `/proc/meminfo` dan mencari baris "MemTotal:". Nilai tersebut kemudian dikembalikan. Jika terjadi kesalahan saat membuka file atau parsing, maka nilai fallback 1 dikembalikan untuk menghindari pembagian dengan nol di tempat lain.
+
+---
+**get_cpu_usage**
+```c
+float get_cpu_usage(const char *pid, long uptime_jiffies, long hertz) {
+    char path[256], line[1024];
+    snprintf(path, sizeof(path), "/proc/%s/stat", pid);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 0.0f;
+
+    fgets(line, sizeof(line), fp);
+    fclose(fp);
+
+    long utime, stime, starttime;
+    sscanf(line,
+           "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %ld %ld %*d %*d %*d %*d %*d %ld",
+           &utime, &stime, &starttime);
+
+    long total_time = utime + stime;
+    long seconds = uptime_jiffies / hertz - starttime / hertz;
+    if (seconds <= 0) return 0.0f;
+
+    return 100.0f * ((float)total_time / hertz) / seconds;
+}
+```
+Fungsi ini menghitung persentase penggunaan CPU dari sebuah proses, dengan membaca file `/proc/<pid>/stat` dan mengambil nilai utime, stime, dan starttime. Waktu proses dijalankan dikurangi dari uptime sistem untuk tahu berapa lama proses hidup, lalu dibagi dengan waktu CPU aktifnya untuk mendapatkan persentase. Jika proses terlalu baru (waktu hidupnya nol), hasil dikembalikan sebagai 0%.
+
+---
+**List**
+```c
+void list_user_processes(const char *username) {
+    unsigned int uid = get_uid_from_username(username);
+    long total_mem_kb = get_total_memory_kb();
+    long hertz = sysconf(_SC_CLK_TCK);
+
+    FILE *uptime_fp = fopen("/proc/uptime", "r");
+    if (!uptime_fp) return;
+    double uptime_sec;
+    fscanf(uptime_fp, "%lf", &uptime_sec);
+    fclose(uptime_fp);
+    long uptime_jiffies = (long)(uptime_sec * hertz);
+
+    DIR *dir = opendir("/proc");
+    struct dirent *entry;
+
+    printf("%-8s %-20s %8s %8s\n", "PID", "COMMAND", "CPU(%)", "MEM(%)");
+    printf("--------------------------------------------\n");
+
+    FILE *log = fopen(LOG_PATH, "a");
+    char timestamp[64];
+
+    while ((entry = readdir(dir)) != NULL) {
+        struct stat st;
+        char fullpath[512];
+        snprintf(fullpath, sizeof(fullpath), "/proc/%s", entry->d_name);
+
+        if (isdigit(entry->d_name[0]) && stat(fullpath, &st) == 0 && S_ISDIR(st.st_mode)) {
+            char *pid = entry->d_name;
+            if (get_uid_from_status(pid) != uid) continue;
+
+            char cmd[128];
+            get_command(pid, cmd, sizeof(cmd));
+            long mem_kb = get_memory_kb(pid);
+            float mem_percent = 100.0f * mem_kb / total_mem_kb;
+            float cpu_percent = get_cpu_usage(pid, uptime_jiffies, hertz);
+
+            printf("%-8s %-20s %8.2f %8.2f\n", pid, cmd, cpu_percent, mem_percent);
+
+            get_timestamp(timestamp, sizeof(timestamp));
+            fprintf(log, "%s_%s_RUNNING\n", timestamp, cmd);
+        }
+    }
+
+    fclose(log);
+    closedir(dir);
+}
+```
+Fungsi ini menampilkan semua proses milik user tertentu dalam bentuk tabel berisi PID, nama proses, CPU usage, dan memori usage. Ia membuka folder `/proc`, menyaring direktori yang merupakan PID, lalu memeriksa UID pemilik proses dan hanya mencetak jika cocok dengan UID user target. Setiap entri juga dicatat ke log `/home/seribu_man/SISOP_2/soal_4/debugmon.log` dengan format timestamp_nama_RUNNING.
+
+---
+**Daemon**
+```c
+void run_as_daemon(const char *username) {
+    pid_t pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);
+    if (pid > 0) exit(EXIT_SUCCESS);
+
+    umask(0);
+    pid_t sid = setsid();
+    if (sid < 0) exit(EXIT_FAILURE);
+    if ((chdir("/")) < 0) exit(EXIT_FAILURE);
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    char pidpath[256];
+    snprintf(pidpath, sizeof(pidpath), "/tmp/debugmon-%s.pid", username);
+    FILE *pidfp = fopen(pidpath, "w");
+    if (pidfp) {
+        fprintf(pidfp, "%d", getpid());
+        fclose(pidfp);
+    }
+
+    unsigned int uid = get_uid_from_username(username);
+    long total_mem_kb = get_total_memory_kb();
+    long hertz = sysconf(_SC_CLK_TCK);
+    char timestamp[64];
+
+    while (1) {
+        FILE *uptime_fp = fopen("/proc/uptime", "r");
+        if (!uptime_fp) continue;
+        double uptime_sec;
+        fscanf(uptime_fp, "%lf", &uptime_sec);
+        fclose(uptime_fp);
+        long uptime_jiffies = (long)(uptime_sec * hertz);
+
+        DIR *dir = opendir("/proc");
+        struct dirent *entry;
+        FILE *log = fopen(LOG_PATH, "a");
+
+        while ((entry = readdir(dir)) != NULL) {
+            struct stat st;
+            char fullpath[512];
+            snprintf(fullpath, sizeof(fullpath), "/proc/%s", entry->d_name);
+
+            if (isdigit(entry->d_name[0]) && stat(fullpath, &st) == 0 && S_ISDIR(st.st_mode)) {
+                char *pid = entry->d_name;
+                if (get_uid_from_status(pid) != uid) continue;
+
+                char cmd[128];
+                get_command(pid, cmd, sizeof(cmd));
+                get_timestamp(timestamp, sizeof(timestamp));
+                fprintf(log, "%s_%s_RUNNING\n", timestamp, cmd);
+            }
+        }
+
+        fprintf(log, "----------------------------------------\n");
+        fclose(log);
+        closedir(dir);
+        sleep(5);
+    }
+}
+```
+Fungsi ini menjalankan debugmon sebagai daemon (background process) untuk user tertentu, mencatat proses milik user tersebut setiap 5 detik ke file log. Proses utama akan fork dan keluar, lalu child process membuat session baru, menutup file descriptor standar, dan menyimpan PID-nya di file `/tmp/debugmon-<username>.pid`. Setiap iterasi, ia membuka `/proc`, mencari proses milik user target, dan mencatat statusnya ke log lengkap dengan timestamp.
+
+---
+**Stop**
+```c
+void stop_daemon(const char *username) {
+    char pidfile[256];
+    snprintf(pidfile, sizeof(pidfile), "/tmp/debugmon-%s.pid", username);
+
+    FILE *fp = fopen(pidfile, "r");
+    if (!fp) {
+        perror("PID file tidak ditemukan");
+        return;
+    }
+
+    int pid;
+    fscanf(fp, "%d", &pid);
+    fclose(fp);
+
+    if (kill(pid, SIGTERM) == 0) {
+        remove(pidfile);
+        printf("Daemon dihentikan.\n");
+    } else {
+        perror("Gagal menghentikan daemon");
+    }
+}
+```
+Fungsi ini menghentikan daemon debugmon milik user tertentu dengan membaca file PID yang terletak di `/tmp/debugmon-<username>.pid`, mengambil PID-nya, lalu mengirim sinyal `SIGTERM` untuk mematikan proses tersebut. Jika berhasil, file PID dihapus dan pesan keberhasilan ditampilkan.
+
+---
+**Fail**
+```c
+void fail(const char *username) {
+    pid_t pid = fork();
+    if (pid < 0) exit(EXIT_FAILURE);
+    if (pid > 0) exit(EXIT_SUCCESS);
+
+    umask(0);
+    setsid();
+    chdir("/");
+
+    char pidfile[256];
+    snprintf(pidfile, sizeof(pidfile), "/tmp/debugmon-fail-%s.pid", username);
+    FILE *fp = fopen(pidfile, "w");
+    if (fp) {
+        fprintf(fp, "%d", getpid());
+        fclose(fp);
+    }
+
+    const char *whitelist[] = {
+        "bash", "sh", "zsh", "sudo", "revert_daemon"
+    };
+    int whitelist_size = sizeof(whitelist) / sizeof(whitelist[0]);
+
+    unsigned int uid = get_uid_from_username(username);
+    char timestamp[64];
+
+    while (1) {
+        DIR *dir = opendir("/proc");
+        if (!dir) continue;
+        struct dirent *entry;
+        FILE *log = fopen(LOG_PATH, "a");
+
+        while ((entry = readdir(dir)) != NULL) {
+            if (!isdigit(entry->d_name[0])) continue;
+
+            char proc_path[512];
+            snprintf(proc_path, sizeof(proc_path), "/proc/%s", entry->d_name);
+            struct stat st;
+            if (stat(proc_path, &st) == -1 || !S_ISDIR(st.st_mode)) continue;
+
+            if (st.st_uid != uid) continue;
+
+            int pid_int = atoi(entry->d_name);
+            if (pid_int == getpid()) continue;
+
+            char cmdline[128] = "";
+            get_command(entry->d_name, cmdline, sizeof(cmdline));
+
+            int allowed = 0;
+            for (int i = 0; i < whitelist_size; ++i) {
+                if (strcmp(cmdline, whitelist[i]) == 0) {
+                    allowed = 1;
+                    break;
+                }
+            }
+
+            if (!allowed) {
+                if (kill(pid_int, SIGKILL) == 0) {
+                    get_timestamp(timestamp, sizeof(timestamp));
+                    if (log) fprintf(log, "%s_KILLED_%s\n", timestamp, cmdline);
+                }
+            }
+        }
+
+        if (log) fclose(log);
+        closedir(dir);
+        sleep(2);
+    }
+}
+```
+Fungsi ini menjalankan mode fail-safe, yaitu daemon yang aktif memantau proses milik user target, dan jika menemukan proses yang bukan bagian dari whitelist (seperti bash, sh, sudo, zsh, revert_daemon), maka proses tersebut akan langsung dihentikan menggunakan `SIGKILL`. Setiap eksekusi proses yang dibunuh akan dicatat di log dengan format timestamp_KILLED_nama. Daemon ini juga menyimpan PID-nya di `/tmp/debugmon-fail-<username>.pid`.
+
+---
+**Revert**
+```c
+void revert(const char *username) {
+    if (getuid() != 0) {
+        fprintf(stderr, "Revert hanya boleh dilakukan oleh root.\n");
+        return;
+    }
+
+    char pidfile[256];
+    snprintf(pidfile, sizeof(pidfile), "/tmp/debugmon-fail-%s.pid", username);
+
+    FILE *fp = fopen(pidfile, "r");
+    if (!fp) {
+        perror("PID file tidak ditemukan");
+        return;
+    }
+
+    int pid;
+    fscanf(fp, "%d", &pid);
+    fclose(fp);
+
+    if (kill(pid, SIGTERM) == 0) {
+        remove(pidfile);
+        FILE *log = fopen(LOG_PATH, "a");
+        char timestamp[64];
+        get_timestamp(timestamp, sizeof(timestamp));
+        fprintf(log, "%s_REVERT_SUCCESS\n", timestamp);
+        fclose(log);
+    } else {
+        perror("Gagal menghentikan daemon");
+    }
+}
+```
+Fungsi ini menghentikan mode `fail` dengan membaca file PID dari `/tmp/debugmon-fail-<username>.pid` dan mengirimkan `SIGTERM` ke daemon tersebut. Fungsi ini hanya bisa dijalankan oleh root (diperiksa dengan `getuid()`), dan jika berhasil, mencatat `REVERT_SUCCESS` ke log. Jika gagal, pesan error akan ditampilkan.
+
+---
+**Main**
+```c
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Gunakan: %s [list|daemon|stop|fail|revert] <username>\n", argv[0]);
+        return 1;
+    }
+
+    const char *mode = argv[1];
+    const char *username = argv[2];
+
+    if (strcmp(mode, "list") == 0) {
+        list_user_processes(username);
+    } else if (strcmp(mode, "daemon") == 0) {
+        run_as_daemon(username);
+    } else if (strcmp(mode, "stop") == 0) {
+        stop_daemon(username);
+    } else if (strcmp(mode, "fail") == 0) {
+        fail(username);
+    } else if (strcmp(mode, "revert") == 0) {
+        revert(username);
+    } else {
+        fprintf(stderr, "Mode tidak dikenali: %s\n", mode);
+        return 1;
+    }
+
+    return 0;
+}
+```
+- Fungsi ini memproses argumen dari command line untuk menentukan mode operasi program.
+- Memastikan jumlah argumen tepat 3 (program + mode + username), jika tidak, tampilkan panduan penggunaan.
+- argv[1] menentukan mode: bisa list, daemon, stop, fail, atau revert.
+- argv[2] adalah nama user yang prosesnya akan dimonitor.
+- Setiap mode memanggil fungsi berbeda:
+    - list → tampilkan proses milik user tersebut.
+    - daemon → jalankan monitoring daemon di background.
+    - stop → hentikan daemon monitoring.
+    - fail → jalankan mode pemusnah proses non-whitelist.
+    - revert → hentikan mode fail (hanya bisa oleh root).
+- Jika mode tidak dikenali, tampilkan pesan error dan keluar dengan status 1.
