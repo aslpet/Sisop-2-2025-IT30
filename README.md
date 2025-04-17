@@ -14,6 +14,7 @@
 	
 ## Soal_1
 </div>
+
 __ACTION, DRAGON CYRUS 🐉__ 
 =
 
