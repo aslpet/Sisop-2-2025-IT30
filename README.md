@@ -939,6 +939,18 @@ int main(int argc, char *argv[]) {
   
 ---
 **Revisi soal_4**
-Seharusnya ketika mode daemon di panggil mode tersebut akan membuat sebuah file log yang berisi proses yang akan terus diupdate selang beberapa detik, tetapi file log tidak muncul
+Seharusnya ketika mode daemon di panggil mode tersebut akan membuat sebuah file log yang berisi proses yang akan terus diupdate selang beberapa detik, tetapi file log tidak muncul. Sebenarnya file log disini bukan tidak muncul atau gagal dibuat tapi berada di direktori yang salah. Seharusnya file log muncul di direktori soal_4 tapi malah muncul di direktori SISOP_2 karena path nya salah
+
+sebelum
+```c
+#define LOG_PATH "/home/seribu_man/SISOP_2/debugmon.log"
+```
 ![alt text](https://github.com/DimasSatya446/GambarSISOP2/blob/main/Screenshot%202025-04-17%20230757.png?raw=true)
+
+sesudah
+```c
+#define LOG_PATH "/home/seribu_man/SISOP_2/soal_4/debugmon.log"
+```
+![alt text](https://github.com/DimasSatya446/GambarSISOP2/blob/main/Screenshot%202025-04-17%20230318.png?raw=true)
+![alt text](https://github.com/DimasSatya446/GambarSISOP2/blob/main/Screenshot%202025-04-17%20230708.png?raw=true)
 
