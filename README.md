@@ -939,6 +939,7 @@ int main(int argc, char *argv[]) {
   
 ---
 **Revisi soal_4**
+=
 Seharusnya ketika mode daemon di panggil mode tersebut akan membuat sebuah file log yang berisi proses yang akan terus diupdate selang beberapa detik, tetapi file log tidak muncul. Sebenarnya file log disini bukan tidak muncul atau gagal dibuat tapi berada di direktori yang salah. Seharusnya file log muncul di direktori soal_4 tapi malah muncul di direktori SISOP_2 karena path nya salah
 
 sebelum
