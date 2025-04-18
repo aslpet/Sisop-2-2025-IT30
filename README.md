@@ -1505,6 +1505,7 @@ sleep(30);` Tidur 30 detik sebelum repeat.
 execv("/proc/self/exe", newargv);
 perror("execv init failed");
 exit(1);` Jalankan ulang dirinya sendiri sebagai `init`
+> Output sebelum revisi soal_3 : ![Screenshot 2025-04-12 155531](https://github.com/user-attachments/assets/4335142b-0267-4d55-a7fb-8ba0fc848e43)
 
 ---
 
