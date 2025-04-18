@@ -10,7 +10,8 @@
 | 2  | Ahmad Rafi Fadhillah Dwiputra     | 5027241068 |
 | 3  | Dimas Satya Andhika              | 5027241032 |
 
-	
+---
+
 ## Soal_1
 
 __ACTION, DRAGON CYRUS 🐉__ 
@@ -446,10 +447,12 @@ mengunduh Clues.zip, mengekstrak isinya, lalu menghapus file ZIP-nya.
 fprintf(stderr, "Usage:\n");
 ```
 menampilkanp panduan jika argumen tidak valid
---- 
+---
+
 ## Soal_2
 
 ---
+
 ## Soal_3
 
 [Author: Afnaan / honque]
@@ -1065,9 +1068,9 @@ execv("/proc/self/exe", newargv);
 perror("execv init failed");
 exit(1);` Jalankan ulang dirinya sendiri sebagai `init`
 
+---
 
 ## Soal_4
-
 
 # Doraemon: Nobita dan Alat Pengintai Proses
 
@@ -1532,6 +1535,11 @@ int main(int argc, char *argv[]) {
 - Jika mode tidak dikenali, tampilkan pesan error dan keluar dengan status 1.
   
 ---
+
+**Revisi soal_3
+
+---
+
 **Revisi soal_4**
 =
 Seharusnya ketika mode daemon di panggil mode tersebut akan membuat sebuah file log yang berisi proses yang akan terus diupdate selang beberapa detik, tetapi file log tidak muncul. Sebenarnya file log disini bukan tidak muncul atau gagal dibuat tapi berada di direktori yang salah. Seharusnya file log muncul di direktori soal_4 tapi malah muncul di direktori SISOP_2 karena path nya salah
