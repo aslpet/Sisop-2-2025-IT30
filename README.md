@@ -447,6 +447,7 @@ mengunduh Clues.zip, mengekstrak isinya, lalu menghapus file ZIP-nya.
 fprintf(stderr, "Usage:\n");
 ```
 menampilkanp panduan jika argumen tidak valid
+
 ---
 
 ## soal_2
@@ -887,7 +888,6 @@ Pada *function* ini, seluruh penggunaan dan inisialisasi pada program/fungsi-fun
     
 -   Memberi keterangan bahwa semua log aktivitas disimpan di `activity.log`.
 - `return 0;`
-
 
 ---
 
