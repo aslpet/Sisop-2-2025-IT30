@@ -451,6 +451,445 @@ menampilkanp panduan jika argumen tidak valid
 
 ## Soal_2
 
+## soal_2
+### Yoisaki Kanade's (🎼🎶✍✨) Decryption Program.
+---
+### Problem:
+  
+> **[...] . Namun sialnya, komputer Kanade terkena sebuah virus yang tidak diketahui. Setelah dianalisis oleh Kanade sendiri, ternyata virus ini bukanlah sebuah trojan, ransomware, maupun tipe virus berbahaya lainnya, melainkan hanya sebuah malware biasa yang hanya bisa membuat sebuah perangkat menjadi lebih lambat dari biasanya.**
+- **Mendownload dan unzip *.zip* yang berisi file (yang termasuk virus) ke dalam dir. *~/starter_kit* melalui [link](https://drive.google.com/file/d/1_5GxIGfQr3mNKuavJbte_AoRkEQLXSKS/view) berikut, lalu mengahapus *.zip* setelah unzip secara otomatis.**
+- **Program *--decrypt* yang akan men*decrypt* nama dari file dengan dasar algo Base64 dalam suatu direktori baru *~/quarantine* dengan basis daemon.**
+- **Fitur memindahankan file dengan *--quarantine* (memindahkan file *~/starter_kit* >  *~/quarantine*) dan *--return* (mengembalikan file *~/quarantine* > *~/starter_kit*).**
+- **Menghapus seluruh file dalam dir. *~/quarantine* dengan *--eradicate*.**
+- **Mematikan program *--decrypt* berdasarkan PID *process*-nya secara aman dengan *---shutdown*.**
+- **Error-Handling dalam mencegah penggunaan *usage* program yang salah.**
+- **Pencatatan *log* seluruh aktivitas program dalam suatu file *activity.log* berdasarkan format yang telah ditentukan. (dalam shift soal)**
+
+### **Structure:**
+
+    soal_2
+	    ├── activity.log
+	    ├── quarantine
+	    ├── starter_kit
+	    │ └── <file hasil unzip>
+	    ├── starterkit
+	    └── starterkit.c
+
+---
+### Code's Key Components
+
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #include <unistd.h>
+    #include <dirent.h>
+    #include <sys/stat.h>
+    #include <sys/types.h>
+    #include <time.h>
+    #include <signal.h>
+    #include <sys/wait.h>
+    
+    #define STARTER_KIT_ZIP "starter_kit.zip"
+    #define STARTER_KIT_DIR "starter_kit"
+    #define QUARANTINE_DIR "quarantine"
+    #define LOG_FILE "activity.log"
+    #define PID_FILE "/tmp/starterkit_decrypt.pid"
+    #define DOWNLOAD_URL "https://drive.google.com/..."
+
+Digunakanan dalam meng*import* seluruh library yang digunakan dalam kode:
+-   I/O (`stdio.h`),  Manajemen memori (`stdlib.h`), dan Manipulasi string (`string.h`)
+    
+-   Operasi sistem seperti fork, wait, mkdir, file handling (`unistd.h`, `sys/stat.h`, `dirent.h`, dll)
+
+Serta mendefinisikan nama file dan directory yang akan digunakan dalam proses kode.
+
+    int stop_daemon = 0;
+    
+    void handle_sigterm(int sig) {
+        stop_daemon = 1;
+    }
+Akan berfungsi sebagai variabel dalam handling signal SIGTERM untuk menghentikan daemon *--decrypt* dalam looping decryption dan programnya itu sendiri.
+
+#### Pencatatan *activity log* dalam penggunaan program
+
+    void write_log_action(const char *action, const char *detail) {
+        FILE *log = fopen(LOG_FILE, "a");
+        if (!log) return;
+    
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        char timestamp[32];
+        strftime(timestamp, sizeof(timestamp), "%d-%m-%Y][%H:%M:%S", tm_info);
+    
+        if (detail)
+            fprintf(log, "[%s] - %s - %s\n", timestamp, detail, action);
+        else
+            fprintf(log, "[%s] - %s\n", timestamp, action);
+    
+        fclose(log);
+    }
+Akan berfungsi sebagai *function* dalam mencatat *log* seluruh aktivitas penggunaan program dengan disertai pencatatan waktu penggunaannya ke dalam file "activity.log".
+
+#### Download dan unzip ".zip" pada program
+
+    void download_and_extract() {
+        struct stat st;
+        if (stat(STARTER_KIT_DIR, &st) == 0) return;
+    
+        printf("⏬ Download dan mengekstrak starter kit, tunggu kejap...\n");
+    
+        pid_t pid = fork();
+        if (pid == 0) {
+            char *args[] = {"sh", "-c", "wget -q --show-progress -O starter_kit.zip 'https://drive.google.com/uc?export=download&id=1_5GxIGfQr3mNKuavJbte_AoRkEQLXSKS'", NULL};
+            execv("/bin/sh", args);
+            exit(EXIT_FAILURE);
+        } else if (pid > 0) {
+            wait(NULL);
+        }
+    
+        mkdir(STARTER_KIT_DIR, 0755);
+    
+        pid = fork();
+        if (pid == 0) {
+            char *args[] = {"sh", "-c", "unzip -q starter_kit.zip -d starter_kit", NULL};
+            execv("/bin/sh", args);
+            exit(EXIT_FAILURE);
+        } else if (pid > 0) {
+            wait(NULL);
+        }
+    
+        remove(STARTER_KIT_ZIP);
+        printf("✅ Starter kit berhasil terdownload dan diekstrak di starter_kit.\n");
+    }
+Fungsi ini digunakan dalam mengunduh dan meng-unzip ".zip" ke dalam dir. *~/starter_kit* serta menghapus ".zip" secara otomatis.
+
+**Cara kerja *function* secara berkala:**
+1. Program akan mengecek jika dir. *~/starter_kit* sudah ada atau belum.
+2. Jika dir. *~/starter_kit* tidak ada, kode akan secara otomatis membuat `fork` , mendownload file ".zip" dengan `wget` ke dalam file bernama "starter_kit.zip" dan membuat dir. *~/starter_kit*.
+3. Dalam *unzipping*, *function* akan membuat `fork` untuk mengekstrak ke dalam dir. *~/starter_kit*.
+4. Menghapus "starter_kit.zip" dan memberi keterangan bahwa *function* telah berhasil dijalankan.
+
+#### Base64 algo decode
+
+    char *base64_decode(const char *input) {
+		static char output[256];
+		memset(output, 0, sizeof(output));
+		
+        const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        int val = 0, valb = -8;
+        size_t len = 0;
+ 
+        for (const char *p = input; *p && *p != '='; p++) {
+            const char *pos = strchr(base64_table, *p);
+            if (!pos) return NULL;
+            val = (val << 6) + (pos - base64_table);
+            valb += 6;
+            if (valb >= 0) {
+                output[len++] = (char)((val >> valb) & 0xFF);
+                valb -= 8;
+                if (len >= sizeof(output) - 1) break;
+            }
+        }
+        output[len] = '\0';
+		if (len < 1) return NULL;
+
+		for (size_t i = 0; i < len; i++) {
+		    if (output[i] == '\n' || output[i] == '\r') {
+		        output[i] = '\0';
+		        break;
+		    }
+		}
+
+	    return output;
+    }
+Berfungsi sebagai algo decode dalam decryption yang didasarkan pada format Base64.
+Algo ini berfungsi dengan mengambil input string nama file dalam format Base64 secara *looping*, lalu mengubahnya ke bentuk aslinya dengan memecah bit-bitnya dan mengembalikan outputnya setelah diproses oleh daemon *--decrypt*.
+
+#### Proses *decryption daemon* dengan PID
+
+    void decrypt_process() {
+        FILE *pidfile = fopen(PID_FILE, "w");
+        if (pidfile) {
+            fprintf(pidfile, "%d", getpid());
+            fclose(pidfile);
+        } else {
+            return;
+        }
+    
+        char message[128];
+        snprintf(message, sizeof(message), "Successfully started decryption process with PID %d.", getpid());
+        write_log_action(message, NULL);
+        printf("🔓 Proses decryption dimulai : (PID %d). Segala activity akan tercatat dalam '%s'.\n", getpid(), LOG_FILE);
+    
+        while (!stop_daemon) {
+            DIR *dir = opendir(QUARANTINE_DIR);
+            if (!dir) {
+                sleep(10);
+                continue;
+            }
+    
+            struct dirent *entry;
+            while ((entry = readdir(dir))) {
+                if (entry->d_type == DT_REG) {
+                    char clean_name[256];
+                    strncpy(clean_name, entry->d_name, sizeof(clean_name));
+                    clean_name[sizeof(clean_name)-1] = '\0';
+                    char *newline = strchr(clean_name, '\n');
+                    if (newline) *newline = '\0';
+                    if (clean_name[0] == '\'' && clean_name[strlen(clean_name)-1] == '\'') {
+                        memmove(clean_name, clean_name+1, strlen(clean_name));
+                        clean_name[strlen(clean_name)-2] = '\0';
+                    }
+    
+                    char *decoded = base64_decode(clean_name);
+                    if (decoded && strlen(decoded) > 0 && strcmp(clean_name, decoded) != 0) {
+                        char oldpath[512], newpath[512];
+                        snprintf(oldpath, sizeof(oldpath), "%s/%s", QUARANTINE_DIR, entry->d_name);
+                        snprintf(newpath, sizeof(newpath), "%s/%s", QUARANTINE_DIR, decoded);
+                        rename(oldpath, newpath);
+                    }
+                }
+            }
+            closedir(dir);
+            sleep(10);
+        }
+    }
+Berfungsi dalam menjalankan daemon process untuk *--decrypt* secara *looping* pada dir. *~/quarantine*.
+
+**Cara kerja *function* secara berkala:**
+1.   Program menyimpan PID daemon di file `/tmp/starterkit_decrypt.pid`.
+    
+2.   Menuliskan log bahwa proses dekripsi telah dimulai.
+    
+3.   Masuk ke dalam loop selama `stop_daemon == 0`.
+    
+4.   Setiap 10 detik:
+		- Membuka folder `quarantine`,
+		- Mengecek file satu per satu,
+		- Jika nama file terenkripsi dalam Base64, algo akan mengdecode nama file dan rename ke nama dari hasil decode.
+            
+5.   Program berhenti hanya jika menerima sinyal `SIGTERM`, yang akan mengubah nilai `stop_daemon` menjadi `1`.
+
+#### Memindahkan seluruh file dari suatu direktori
+
+    void move_files(const char *src, const char *dst, const char *label) {
+        DIR *dir = opendir(src);
+        if (!dir) return;
+    
+        int found = 0;
+        struct dirent *entry;
+        while ((entry = readdir(dir))) {
+            if (entry->d_type == DT_REG) {
+                found = 1;
+                char oldpath[512], newpath[512];
+                snprintf(oldpath, sizeof(oldpath), "%s/%s", src, entry->d_name);
+                snprintf(newpath, sizeof(newpath), "%s/%s", dst, entry->d_name);
+    
+                struct stat st;
+                if (stat(newpath, &st) == 0) continue;
+    
+                rename(oldpath, newpath);
+    
+                if (strcmp(label, "quarantine") == 0) {
+                    write_log_action("Successfully moved to quarantine directory.", entry->d_name);
+                } else {
+                    write_log_action("Successfully returned to starter kit directory.", entry->d_name);
+                }
+            }
+        }
+        if (!found) {
+            printf("⚠️ Tidak ada file dalam %s untuk dipindah\n", src);
+        } else {
+            if (strcmp(label, "quarantine") == 0) {
+                printf("📁 Seluruh file berhasil dipindahkan ke quarantine.\n");
+            } else {
+                printf("📂 Seluruh file berhasil dikembalikan ke starter kit.\n");
+            }
+        }
+        closedir(dir);
+    }
+Berfungsi dalam memindahkan keseluruhan file yang ada pada suatu direktori ke dir. lainnya dengan path.
+Secara sederhana, kode pemindahan file akan berjalan dengan alur:
+-   Program membuka direktori sumber (`starter_kit` atau `quarantine`).
+    
+-   Program membaca semua file dalam folder sumber.
+    
+-   Untuk setiap file reguler:
+    
+    -   Menyusun path asal dan tujuan,
+        
+    -   Mengecek apakah file pada dir. tujuan sudah ada,
+        
+    -   Jika belum ada, file dipindah (`rename()`) yang juga berfungsi sebagai `move`,
+        
+    -   Menulis log untuk file yang dipindahkan.
+        
+-   Menampilkan informasi ke user apakah file berhasil dipindahkan atau tidak.
+    
+-   Menutup folder setelah selesai.
+
+#### Menghapus seluruh file dari direktori *~/quarantine*
+
+    void eradicate_files() {
+        DIR *dir = opendir(QUARANTINE_DIR);
+        if (!dir) {
+            printf("⚠️ Tidak ada quarantine folder.\n");
+            return;
+        }
+    
+        int found = 0;
+        struct dirent *entry;
+        while ((entry = readdir(dir))) {
+            if (entry->d_type == DT_REG) {
+                found = 1;
+                char path[512];
+                snprintf(path, sizeof(path), "%s/%s", QUARANTINE_DIR, entry->d_name);
+                remove(path);
+                write_log_action("Successfully deleted.", entry->d_name);
+            }
+        }
+        if (!found) {
+            printf("⚠️ Files dalam quarantine tidak ditemukan untuk eradicate.\n");
+        } else {
+            printf("🗑️ Semua file telah dihapus dalam quarantine.\n");
+        }
+        closedir(dir);
+    }
+Berfungsi dalam menghapus seluruh file yang ada dalam direktori *~/quarantine*.
+Secara sederhana, kode penghapusan selurh file akan berjalan dengan alur:
+-   Program mencoba membuka folder `quarantine`, jika folder tidak ditemukan, tampilkan peringatan dan keluar.
+-   Jika tidak ada file yang ditemukan didalam dir. *~/quarantine*, tampilkan pesan bahwa dir. kosong.
+    
+-   Jika berhasil:
+    
+    -   Program mengecek seluruh entri file:
+        
+        -   Susun path lengkap file,
+            
+        -   Hapus file tersebut dari sistem,
+            
+        -   Catat log bahwa file berhasil dihapus.
+            
+-   Setelah proses penghapusan file, tampilkan pesan bahwa proses eradikasi berhasil.
+        
+-   Tutup folder.
+
+#### Mematikan/menghentikan daemon process *--decrypt*
+
+    void shutdown_daemon() {
+        FILE *pidfile = fopen(PID_FILE, "r");
+        if (!pidfile) {
+            printf("❌ Error: Tidak ada proses decrypt yang running.\n");
+            return;
+        }
+        int pid;
+        if (fscanf(pidfile, "%d", &pid) != 1) {
+            printf("❌ Error: Gagal untuk membaca PID file.\n");
+            fclose(pidfile);
+            return;
+        }
+        fclose(pidfile);
+        kill(pid, SIGTERM);
+        remove(PID_FILE);
+    
+        char message[128];
+        snprintf(message, sizeof(message), "Successfully shut off decryption process with PID %d.", pid);
+        write_log_action(message, NULL);
+        printf("🔒 Proses decrytion telah berhasil dimatikan.\n");
+    }
+
+Berfungsi dalam menghentikan/mematikan proses daemon *--decrypt* yang berjalan di backgrond berdasarkan PID-nya.
+
+**Cara kerja *function* secara berkala:**
+1. Program mencoba membuka file `/tmp/starterkit_decrypt.pid`.
+*! : `/tmp/starterkit_decrypt.pid` adalah file yang berisi PID daemon process *--decrypt* di `/tmp/`
+    
+2. Jika file tidak ditemukan → tampilkan error dan keluar.
+    
+3. Jika file ditemukan:
+    
+    -   Baca PID dari file dengan `fscanf()`,
+        
+    -   Kirim sinyal `SIGTERM` ke proses daemon dengan PID tersebut yang akan memberikan sinyal kepada handler `SIGTERM` dan mengubah `stop_daemon = 1`.
+        
+    -   Hapus file PID,
+        
+4. Tulis log bahwa proses daemon dimatikan dan tampilkan pesan sukses *--shutdown* ke user.
+
+#### Code Main Function
+
+    int main(int argc, char *argv[]) {
+        signal(SIGTERM, handle_sigterm);
+        mkdir(QUARANTINE_DIR, 0755);
+        download_and_extract();
+    
+        if (argc < 2) {
+            printf("📌 Usage: ./starterkit [--decrypt | --quarantine | --return | --eradicate | --shutdown]\n");
+            return 1;
+        }
+    
+        printf("📝 Seluruh activity akan disimpan dalam '%s'.\n", LOG_FILE);
+    
+        if (strcmp(argv[1], "--decrypt") == 0) {
+            FILE *pidfile = fopen(PID_FILE, "r");
+            if (pidfile) {
+                fclose(pidfile);
+                printf("⚠️ Proses decryption telah berjalan.\n");
+                return 1;
+            }
+            pid_t pid = fork();
+            if (pid < 0) {
+                perror("fork");
+                return 1;
+            }
+            if (pid > 0) {
+                return 0;
+            }
+            setsid();
+            umask(0);
+            decrypt_process();
+    
+        } else if (strcmp(argv[1], "--quarantine") == 0) {
+            move_files(STARTER_KIT_DIR, QUARANTINE_DIR, "quarantine");
+    
+        } else if (strcmp(argv[1], "--return") == 0) {
+            move_files(QUARANTINE_DIR, STARTER_KIT_DIR, "return");
+    
+        } else if (strcmp(argv[1], "--eradicate") == 0) {
+            eradicate_files();
+    
+        } else if (strcmp(argv[1], "--shutdown") == 0) {
+            shutdown_daemon();
+    
+        } else {
+            printf("❌ Error: Command '%s' tidak dikenali. Gunakan command usage yang ada.\n", argv[1]);
+            printf("📌 Usage: ./starterkit [--decrypt | --quarantine | --return | --eradicate | --shutdown]\n");
+            return 1;
+        }
+    
+        return 0;
+    }
+Pada *function* ini, seluruh penggunaan dan inisialisasi pada program/fungsi-fungsi yang ada dalam kode sebagai *flag* eksekusi dan lainnya.
+
+-   Program meng-setup sinyal `SIGTERM` dan buat folder `quarantine`.
+    
+-   Cek apakah `starter_kit` sudah ada, jika tidak → *function download dan ekstrak* dijalankan.
+    
+-   Validasi apakah pengguna memberikan argumen dengan `argv[1]`.
+    
+-   Jalankan perintah sesuai flag:
+    
+    -   `--decrypt` akan mengecek ada/tidaknya file PID, jika ada akan memberikan warning, jika belum maka *function --decrypt* akan dijalankan. 
+    - `--quarantine` menjalankan dan set path untuk memindahkan file dari *~/starter_kit* ke *~/quarantine*,  begitupun sebaliknya untuk `--return`.
+    - `--eradicate` akan menjalankan sesuai *function*-nya.
+    - `--shutdown` akan menghentikan daemon process dari PID-nya sesuai *function*-nya dengan sinyal `SIGTERM`.
+        
+-   Jika tidak valid, tampilkan error dan usage sebagai *error-handling* pada penggunaan usage kode.
+    
+-   Memberi keterangan bahwa semua log aktivitas disimpan di `activity.log`.
+- `return 0;`
+
+
 ---
 
 ## Soal_3
