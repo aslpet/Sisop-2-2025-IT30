@@ -449,9 +449,8 @@ fprintf(stderr, "Usage:\n");
 menampilkanp panduan jika argumen tidak valid
 ---
 
-## Soal_2
-
 ## soal_2
+
 ### Yoisaki Kanade's (🎼🎶✍✨) Decryption Program.
 ---
 ### Problem:
