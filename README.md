@@ -446,9 +446,10 @@ mengunduh Clues.zip, mengekstrak isinya, lalu menghapus file ZIP-nya.
 fprintf(stderr, "Usage:\n");
 ```
 menampilkanp panduan jika argumen tidak valid
-
+--- 
 ## Soal_2
-	
+
+---
 ## Soal_3
 
 [Author: Afnaan / honque]
